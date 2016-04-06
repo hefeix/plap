@@ -1,0 +1,1 @@
+Plap is a program evolution system and programming language based on probabilistic semantics that operates under assumptions of insufficient knowledge and resources. When no definite answer to a user's query is available, the system can return speculative answers synthesized through induction (program evolution), analogical mapping, and/or inference.

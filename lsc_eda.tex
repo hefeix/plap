@@ -1,0 +1,552 @@
+\documentclass[letterpaper]{article}
+\usepackage{epsfig,algpseudocode,algorithm,amsmath}
+\setlength{\pdfpagewidth}{8.5in}
+\setlength{\pdfpageheight}{11in}
+\topmargin 4.5pc
+\advance\topmargin by -1.1in
+\textheight 660pt
+%\makeatletter
+%\def\NAT@parse{\typeout{This is a fake Natbib command to fool Hyperref.}}
+%\makeatother
+%\usepackage[hyperfootnotes=false]{hyperref}
+\usepackage{hyperref}
+\hypersetup{
+  letterpaper,
+  pdfpagemode=none,
+  pdftitle=
+  {Generalized Schemata, Iterated Descent, and Estimation of Distributions},
+  pdfauthor={Moshe Looks},
+}
+\DeclareMathOperator*{\argmax}{argmax}
+\begin{document}
+\sloppy
+\title
+{Generalized Schemata, Iterated Descent, and Estimation of Distributions}
+\author{
+  Moshe Looks
+  \href{mailto:moshe@metacog.org}{\emph{madscience@google.com}}
+}
+\maketitle
+
+\begin{abstract}
+  I propose a new class of estimation-of-distribution algorithms. The
+  theoretical basis is hierarchical problem decomposition into generalized
+  schemata (building-blocks). The search procedure is based on focused random
+  walks, Metropolis transitions, and iterated descent. The approach to
+  probabilistic model-building is inspired by the building-block hill-climber
+  and the hierarchical Bayesian optimization algorithm.
+\end{abstract}
+
+\section{Theoretical Basis}
+
+Estimation-of-distribution algorithms (EDAs) are optimizers that maintain and
+sample from a distribution of ``good'' solutions. It is important to note that
+the character of this distribution - which novel solutions we will tend to
+sample from it - depends crucially on what classes of subsolution features, or
+\emph{schemata}, we deem useful a priori. In other words, the same data,
+modeled with different classes of schemata, will yield different
+generalizations. The majority of existing EDAs construct their models in based
+on Holland's original schema formalism~\cite{Holland,Goldberg}.
+
+The fundamental formalism of genetic algorithms is John Holland's schema: a
+string of length $n$ drawn from the alphabet $\{?,0,1\}$, in the context of an
+optimization problem over the domain $\{0,1\}^n$. For $n=4$, for example, the
+schema $0?1?$ \emph{matches} the four solutions $0010$, $0011$, $0110$, and
+$0111$ (these solutions are said to \emph{contain} the schema $0?1?$). It
+\emph{competes} with the schemata $0?0?$, $1?0?$, and $1?1?$. It is mutually
+exclusive to, or \emph{disrupts} all of the schemata that contain a $1$ in
+first position or a $0$ in the third position ($1???$, $0001$, etc.).
+
+The Bayesian Optimization Algorithm (BOA)~\cite{BOA} represents problem
+decompositions for $n$-bit optimization problems as Bayesian Networks with one
+variable per bit. What does the network structure actually \emph{mean}, in
+terms of the individual bits in the optimization problem? Lets first consider a
+network with no edges. The $i$th node in the network ($x_i$, where $0 \leq i <
+n$) may be understood to model the competition between the schemata
+$?^{i-1}0?^{n-i}$ and $?^{i-1}1?^{n-i}$. These schemata are considered to be in
+competition because one and only one of them must appear in every complete
+solution. An empty Bayesian Network corresponds to assuming complete
+independence amongst our variables. This is equivalent to only considering
+first-order schemata (schemata with exactly one $0$ or $1$); we assume that the
+optimal value for any bit in our optimization problem may be found
+independently of all others.
+
+What if we add the edge $(x_i,x_j)$? We are now considering statistics
+for all (four) second-order schemata involving these two variables. Assuming a
+three-bit optimization problem with $i=0$ and $j=1$, where $x_2$ remains
+independent, the full set of schemata we are tracking will be:
+\begin{equation}
+  S = \{0??, 1??, 00?, 01?, 10?, 11?, ??0, ??1\} .
+\end{equation}
+
+Note that in principle the directionality of the edge is significant; because
+the edge is from $x_0$ to $x_1$, we still track the first-order statistics for
+$x_0$, while those for $x_1$ are discarded in favor of the second-order
+schemata listed above. If we further add the edge $(x_2,x_0)$, the schemata
+considered will be:
+\begin{equation}
+  S = \{0?0, 0?1, 1?0, 1?1, 00?, 01?, 10?, 11?, ??0, ??1\}.
+\end{equation}
+If instead of $(x_2,x_0)$ we add the edge $(x_2,x_1)$, the schemata considered
+will be:
+\begin{equation}
+  S = \{0??, 1??, 000, 001, 010, 011, 100, 101, 110, 111, ??0, ??1\}.
+\end{equation}
+
+Since we are now tracking all of the third-order schemata in a three-bit
+optimization problem, the network is not doing a very good job of modeling
+(i.e. compressing) the data - the Bayesian Network representation is of course
+most effective when the maximal order of the schemata we need to track ($k$) is
+much lower than the size of the problem ($n$), but non-zero.
+
+So one way to look at the probabilistic models learned by the BOA is as
+specifying a particular set of low-order schemata that are (hopefully)
+sufficient for quickly finding a solution to our problem. If our set of
+schemata is larger than strictly necessary, we will need to consider more
+solutions (intuitively, the number solutions that must be considered is
+$O(|S|)$). If our set of schemata is too small, however (i.e. considers
+schemata of too low an order), we will only ever reach a local optimum in our
+search, unless we are willing to examine on the order of $|S| \cdot n^{d}$
+solutions, where $d$ is difference between the \emph{actual} order of the
+largest schemata in the problem and the order of the largest schemata in $S$.
+
+Adding edges is to a model quite expensive; if $x_j$ has $k$ incoming edges,
+adding a new edge $(x_i,x_j)$ will increase the number of schemata we must
+consider (i.e. the size of our conditional probabilities table) by $2^k$. To
+address primarily this issue, the hierarchical BOA (hBOA)~\cite{hBOA} was
+developed, which uses a finer-grained representation than a Bayesian Network -
+a Bayesian Network with local structure (i.e. decision graphs or trees). The
+hBOA allows us to take smaller steps in model-building, and add accordingly
+fewer schemata at a time to $S$.
+
+Consider the three-node network above, with the single edge $(x_0,x_1)$.  With
+the hBOA, we can say that $x_1$ is also dependent on $x_2$, but only when
+$x_0=0$. This will give us the schemata:
+\begin{equation}
+  S = \{0??, 1??, 000, 001, 010, 011, 10?, 11?, ??0, ??1\}.
+\end{equation}
+Even though the order of the model has increased from two to three, we have
+only increased the number of schemata we must consider by two, not four. For
+complex models, the savings from applying the hBOA vs. the BOA can be
+huge. With decision graphs we can even apply \emph{merge} operations that
+decrease the number of schemata maintained. If we decide that if $\{x_0=0,
+x_2=1\}$ should be merged with $x_0=1$, we get the schemata:
+\begin{equation}
+  S = \{0??, 1??, 000, 010, ?0?, ?1?, ??0, ??1\}.
+  \footnote{While merge operations aren't especially useful in practice, they
+    are a nice illustration of increased expressiveness.}
+\end{equation}
+
+At this point one might ask, why bother with any kind of model structure at
+all? If, at the end of the day, we are just manipulating sets of schemata, why
+not just maintain such a set in memory, allowing for the finest-grained
+manipulation possible? There are two significant motivations for using a
+probabilistic model:
+
+\begin{enumerate}
+\item There are well-developed and tractable heuristics for learning
+  probabilistic models from data.
+\item Sampling from the probability distribution defined by such a model (plus
+  marginals) is simple and fast.
+\end{enumerate}
+
+One can in fact design an EDA based on directly learning a set of ``useful
+distinguishing schemata'' and using them to generate new instances (this is a
+case of the Learnable Evolution Model approach~\cite{LEM}). But let us return
+our attention to the schemata themselves.
+
+\subsection{The Difficulty with non-Holland Schemata}
+
+Lets consider a very simple optimization problem where the goal is to discover
+a string of length $n$ that contains $k$ consecutive ones. Unfortunately, our
+schema formalism is not very useful in modeling this state of affairs - to
+describe the optima, we will need $n-k+1$ schemata, one per optimum. It seems
+quite natural to introduce, in addition to $?$ for a single ``don't-care''
+value, the symbol $*$ for ``any number of don't-care values''. The optima for
+this problem may now be described with a single schema, $*1^k*$.
+
+But can we introduce a corresponding EDA, together with model-building and
+sampling procedures, for these new schemata? Unfortunately, this appears to be
+rather difficult (I give it a shot in~\cite{fbBOA}). What makes modeling and
+sampling so easy for EDAs based on classical schemata is the way that they
+naturally carve up the search space into disjoint subsets:
+\begin{enumerate}
+\item First-order Holland schemata are closed under complement.
+\item Holland schemata that specify values for disjoint variables may be
+  specified independently of each other (e.g. $1?$ and $?0$ never conflict).
+\item A set of Holland schemata may be easily sampled that fully specify a
+  solution without overspecifying it.
+\end{enumerate}
+In contrast:
+\begin{enumerate}
+\item The complement of a first-order extended schemata will not usually be an
+  extended schemata.
+\item Extended schemata with $*$s in them will often conflict with each other.
+\item The same set of extended schemata can both overspecify and underspecify
+  solutions, depending on how they are applied (consider $*11*$ and $*00*$ in a
+  three-bit optimization problem).
+\end{enumerate}
+
+\section{Search Procedure}
+
+What I propose as a solution to this difficulty is a new stochastic search
+procedure that may operate generically on a wide range of schema classes. We
+can define a valid ``schema space''\footnote{This was Ben Goertzel's
+suggestion.} a for metric solution space $X$ as a triplet
+$(Y,nearest,disrupts)$ such that:
+
+\begin{enumerate}
+\item For all $x \in X$ and $y \in Y$, $nearest(x,y)$ is the set of solutions
+  containing schema $y$ that are closest to $x$ (in particular $x$ contains $y$
+  iff $nearest(x,y)=\{x\}$).
+\item For all $Z \subseteq Y$, $disrupts(Z)$ is true iff there exists no
+  solution $x \in X$ that contains every schema in $Z$.
+\end{enumerate}
+
+Mathematically, $disrupts$ is not necessary for finite solution spaces - we can
+simply enumerate all solutions, and define the $disrupts$ function based on
+which combinations of schemata do and do not appear in any solution. Rather, an
+efficient means of determining whether or not schemata may co-occur in
+solutions is necessary in order for probabilistic model-building to be
+implemented efficiently and generically.
+
+Lets assume that we have a well-chosen schema space given to us.\footnote{One
+  that reduces deceptiveness and encapsulates the strongest interactions
+  between variables.} How can we use this structure to approximate uniform
+sampling of solutions that maximize our scoring function?  For simple problems,
+and even for difficult problems such as traps which nonetheless are noise-free
+and have crisp decompositions, a straightforward hill-climbing approach will be
+sufficient (cf.~\cite{Iclanzan}). Let the neighbors of some solution $x$,
+according to a schema space $(Y,nearest,disrupts)$, be defined as the union of
+$nearest(x,y)$ over all $y \in Y$, excluding $x$. We will then do:
+
+\begin{algorithmic}
+\Procedure{Hillclimb}{Solution $x$}
+  \While{termination criterion not met}
+    \If{all neighbors of $x$ have been visited}
+      \State \textbf{fail}
+    \EndIf
+    \State $x' \leftarrow$ a random neighbor of $x$
+    \If{$x'$ improves on $x$}
+      \State $x \leftarrow x'$
+    \EndIf
+  \EndWhile
+\EndProcedure
+\end{algorithmic}
+
+How the schemata that define the neighborhood are acquired is not yet
+specified; it may be via the BOA or hBOA, Ben Goertzel's proposed PLEASURE
+(``Program Learning via Ensemble Analysis and SUbstitution of Repeated
+Entities.'')  algorithm~\cite{PLEASURE}, the feature selection scheme from the
+feature-based BOA~\cite{fbBOA}, etc., or some combination thereof. The way this
+new procedure overcomes the difficulties of over- and under-specification is by
+applying the model in a local rather than a global context; rather than
+generating entire solutions \emph{de novo} according to our model, we will use
+it to propose transformations to existing solutions.
+
+Now, consider that even with the right problem decomposition, hill-climbing
+will fail at noisy problems. To avoid this, we can use a metropolis sampling
+scheme such as simulated annealing, where a worse move is sometimes accepted.
+
+Furthermore, some solution spaces may have extremely large
+neighborhoods. Problems with such spaces will only be tractable if will
+knowledge (prior and/or acquired) of which neighbors are likely to be
+promising. An examples of such a problem is Boolean maximum satisfiability,
+which simple \emph{focused} random walk heuristics (instead of flipping a
+random variable, flip a variable appearing in an unsatisfied clause) such as
+WalkSAT~\cite{WalkSAT} can scale up to millions of variables, while simulated
+annealing can only handle hundreds. 
+
+On the other hand, these procedures do not sample optima uniformly, as
+metropolis-based procedures tend to. By combining steps taken by a metropolis
+approach with greedier focused moves, near-uniform sampling can be
+restored~\cite{WalkSampling}.\footnote{Sampling optima near-uniformly is
+  crucial for linkage learning, discussed in the next section.} Specifically,
+this combination allows us to continue to explore nearby optima even after we
+have already found an optimal or near-optimal solution. So our procedure
+becomes the following:
+
+\begin{algorithmic}
+\Procedure{StochasticLocalSearch}{Solution $x$}
+  \While{termination criterion not met}
+    \If{all neighbors of $x$ have been visited}
+      \State \textbf{fail}
+    \ElsIf{$Metropolis()$}
+      \State $x' \leftarrow$ a random neighbor of $x$
+      \If{$x'$ improves on $x$ or $MetropolisNoise(x,x')$}
+        \State $x \leftarrow x'$
+      \EndIf
+    \Else
+      \State $x' \leftarrow$ a random neighbor of $x$ with highest expected
+      utility
+      \If{$x'$ improves on $x$ or $FocusedNoise(x,x')$}
+        \State $x \leftarrow x'$
+      \EndIf
+    \EndIf
+  \EndWhile
+\EndProcedure
+\end{algorithmic}
+
+This procedure should be able to solve even noisy and difficult problems, and
+sample relatively uniformly over optimal solutions when executed repeatedly
+from different random initial conditions. However, on demanding problems with
+very many local optima, it may still stagnate, and be unable to overcome strong
+attractor basins and reach global optima. I hypothesize that this sort of
+large-scale topology may still appear in a search space, irrespective of
+schemata we may discover (i.e. the search space may be intrinsically
+irregular). 
+
+A proposed solution is to structure the search as a large-step Markov
+chain~\cite{LSMC}. This technique is based on a paradigm originally proposed by
+Baum, known as ``iterated descent''~\cite{BaumDescent}. Instead of continuing
+to expend computational effort on diminishing returns after search has
+stagnated, or restarting search from an entirely new location, iterated descent
+proposes that a macromutation (or ``kick'') procedure be employed that
+randomizes a significant number, but not all, of the subcomponents in the local
+optimum that we have reached. The key to this method is for the macromutation
+to be large enough to escape from the basin of attraction surrounding the
+current local optimum (so that the search is unlikely to return to the same
+optimum), but not so large as to destroy all of the learned structure. The
+combination of a macro-mutation followed by local search is considered a single
+state transition in the Markov chain, and leads to the following procedure:
+
+\begin{algorithmic}
+\Procedure{MarkovianStochasticLocalSearch}{Solution $x$}
+  \While{termination criterion not met}
+    \If{all neighbors of $x$ have been visited or $Stuck()$}
+      \State $Macromutation()$
+    \ElsIf{$Metropolis()$}
+      \State $x' \leftarrow$ a random neighbor of $x$
+      \If{$x'$ improves on $x$ or $MetropolisNoise(x,x')$}
+        \State $x \leftarrow x'$
+      \EndIf
+    \Else
+      \State $x' \leftarrow$ a random neighbor of $x$ with highest expected
+      utility
+      \If{$x'$ improves on $x$ or $FocusedNoise(x,x')$}
+        \State $x \leftarrow x'$
+      \EndIf
+    \EndIf
+  \EndWhile
+\EndProcedure
+\end{algorithmic}
+
+In practice it would be desirable to use a single procedure for both
+$MetropolisNoise$ and $FocusedNoise$, or to set one (or even both of them) to
+zero; unfortunately there does not appear to be much theoretical guidance in
+the realm of hybrid methods. 
+
+In order to have a complete search procedure operating on generalized schemata,
+we still need to specify how linkages between schemata are learned (or
+equivalently, how we build probabilistic models distinguishing between good and
+bad solutions); this will be described in the next section, and will take
+advantage of the $disrupts$ procedure specified above as part of a schema
+space.
+
+\section{Probabilistic Model-Building}
+
+The purpose of probabilistic model-building is to iteratively factor out any
+large-scale regularities that might be present in the search space. For
+tractability (these problems are at least NP-hard) I consider here only
+bottom-up greedy methods (which can still be quite expensive). Specifically,
+all procedures will have the general form:
+
+\begin{algorithmic}
+\Procedure{AgglomerativeModelBuilding}{Schemata $S$,Data $D$}
+  \State Select eligible schemata $s_1,s_2 \in S$ most linked according to $D$
+  \If{$s_1 \wedge s_2$ doesn't overfit}
+    \State $S \leftarrow S \cup \{s_1 \wedge s_2\}$
+  \EndIf
+  \If{$\neg (s_1 \wedge s_2)$ doesn't overfit}
+    \State $S \leftarrow S \cup \{\neg (s_1 \wedge s_2)\}$
+  \EndIf
+  \If{$S$ has changed}
+    \State $S \leftarrow GreedyAgglomerativeModel(S,D)$
+  \EndIf
+  \State \textbf{return} $S$
+\EndProcedure
+\end{algorithmic}
+
+The initial model-building call will have $S$ be the set of first-order
+schemata in our schema space. Note that being able to compute whether
+individual schemata are present in or absent in some solution allows us to
+efficiently compute whether conjunctions and negations of schemata are present
+or absent. Similarly, having the predicate $disrupts$ lets us efficiently
+decide whether a pair of schemata is eligible for linkage or not, without
+considering the data (i.e. we need only consider $D$ for sets of schemata $Z$
+where $disrupts(Z)$ is false). For further efficiency we should exploit that
+for all sets of schemata $A$ and $B$, $A \subset B \wedge disrupts(A)
+\rightarrow disrupts(B)$.
+
+When agglomerative model-building is integrated into stochastic local search,
+the iterated descent process will no longer be Markovian (since grouping
+together schemata as search progresses will modify transition
+probabilities). Inspired by the building-block hill-climber~\cite{Iclanzan}, I
+propose only applying model-building to local optima or near-local optima
+(i.e. to solutions that have the macromutation operator applied to them). This
+limits the resources that will need to be expended on model-building, which can
+be quite computationally expensive, and also reduces noise.
+
+In order for model-building to be fully accurate up to level-$k$ interactions,
+$O(n \cdot 2^k)$ ``sufficiently large'' macromutations will need to be
+performed. I have not yet worked out a how to properly size macromutations, but
+it should be possible along the lines of EDA population sizing equations
+(cf.~\cite{DOI}). Furthermore, note that macromutations should be carried out
+on a schema level (as Iclanzan does), rather than on the level of individual
+variables. Doing so efficiently requires using the $disrupts$ relationship. A
+simple heuristic for this is:
+\begin{algorithmic}
+\Procedure{Macromutate}{Schemata $S$, Solution $x$,Size $size$}
+  \State $z \leftarrow$ a random schema from $S$
+  \State remove $z$ from $S$
+  \While{$|Z|<size$ and $|S|>0$}
+    \State $s \leftarrow$ a random schema from $S$
+    \If{$\neg disrupts(\{s,z\})$}
+      \State $z \leftarrow z \wedge \{s\})$
+    \EndIf
+    \State remove $s$ from $S$
+    \State $x \leftarrow$ a random solution from $nearest(x,z)$
+  \EndWhile
+  \State \textbf{return} $x$
+\EndProcedure
+\end{algorithmic}
+This procedure assumes $S$ contains only schemata not present in $x$:
+
+Finally, note that for both agglomerative model building and macromutation, I
+am assuming that our schema space is closed under conjunction. If one wants to
+learn negated schemata in agglomerative model-building, it must be closed under
+negation as well.
+
+\section{Assigning and Updating Utilities}
+
+I will assume that the values returned by the scoring function are linearly
+scaled - e.g. an improving the score of the current solution by $c$ at one
+point in the search is as good as improving the score by $c$ some other point
+in the search, improving the score of the current solution by $2c$ is as good
+as improving it by $c$ twice at other points in the search, etc.\footnote{If it
+  turns out empirically to be the case that progressing via fewer large jumps
+  is less computationally costly than progressing via many small jumps, or vice
+  versa, this preference may be incorporated as well, though it is not obvious
+  to me that this distinction is worth pursuing.}  On this basis, given a
+solution $x$, a set of schemata $S$ that are not present in $x$, a set $X$ of
+solutions that have been visited, and a scoring function $f$, the set of
+solutions with highest expected utility may be computed as:
+\begin{align}
+nearest(\argmax_{s \in S} \qquad &E(f(x')|x' \in X, present(x',s)) \nonumber \\
+                              - &E(f(x')|x' \in X, \neg present(x',s))) .
+\end{align}
+
+It may be necessary for performance concerns to use an approximation to this
+score. The need arises from two issues:
+
+\begin{enumerate}
+\item There may be too many visited solutions to keep track of them all and
+  which schemata they contain.
+\item There may be too many schemata for us to do an $\argmax$ operation over
+  all of them.
+\end{enumerate}
+
+The first of these issues may be address via any number of techniques from the
+evolutionary computation literature, together with some clever caching. To
+address the second I propose that the set of schemata $S$ be mapped onto a
+directed acyclic graph, such that children are mapped to subsets of their
+parents, and leaves are mapped to individual schemata in $S$. When we don't
+have the resources to select the highest-utility move over the entire tree, we
+can use the approximation of greedily traversing the DAG from the root downward
+until we reach a leaf. There are still details to be worked out here...
+
+It is additionally worth noting that prior probabilities and structural
+knowledge regarding relationships between schemata (e.g. that a certain set of
+schemata form a class of similar moves) can and should be incorporated into
+expected utility computations as well.
+
+\section{Phenotypic Schemata}
+
+Let's take a step back for a second and take a broader view of optimization
+processes. Schemata such as we have considered in a schema space may be
+considered to be ``genotypic'' (intensional) - they correspond to known
+properties of solutions (we can easily determine solutions with these
+properties via the $nearest$ function) with known interrelationships
+(determined via the $disrupts$ predicate). There are also ``phenotypic''
+(extensional) properties of solutions, that may vary from problem to
+problem. For example, in a supervised categorization problem, a solution's
+phenotype might correspond to a vector containing its results on all training
+data.
+
+There are two ways this additional information might be used:
+\begin{enumerate}
+\item Under some circumstances it might be desirable, when reaching a stuck
+  condition, to perform backtracking to an earlier point in the search rather
+  than to perform a macromutation. Keeping track of a set of phenotypically
+  diverse (specifically, non-dominating~\cite{pairwisecomp}) solutions seems a
+  useful heuristic for identifying backtracking points.
+\item More ambitiously, we could do learning over which phenotypic features are
+  important (possibly building a model of them via a cheap technique such as
+  linear regression), and do alternating searches on
+  good-phenotypic-feature-maximization vs. the actual scoring function (as in
+  the STAGE approach~\cite{stage}).
+\end{enumerate}
+
+Similarly, in cases where we have multiple processors and wish to carry out
+search in parallel, diversity of phenotypic schemata seems like a good
+heuristic. Alternatively, we could simply apply $n$ different macromutation
+operations to provide starting points for $n$ different processors, although
+for some problems this might lead to duplication of effort.
+
+\section{Summary and Open Questions}
+
+I have described an adaptive large-step chain EDAs with a number of attractive
+properties:
+\begin{enumerate}
+\item It is a generalization simulated annealing.
+\item It is a generalization of breadth-first search.
+\item It is a generalization of best-first search.
+\item It can operate on any type of schemata (or combination of types) - all
+  that we need is a predicate indicating whether a given schema is present or
+  absent in a solution, a predicate indicating whether a set of schemata may be
+  applied in conjunction to a given solution, and a procedure for transforming
+  a solution to contain a set of schemata that are not already present.
+\item Under-specification is not a problem because we are basing our
+  transformations on a solution that is already fully specified.
+\item Over-specification is not a problem because we explicitly remove from
+  consideration those combinations of schemata than conflict.
+\item If we consider schemata that are negations of features, we can also learn
+  from the commonalities in \emph{bad} solutions that have been observed (as
+  proposed in PLEASURE~\cite{PLEASURE}, for instance).
+\item It supports soft chunking by allowing conflicting schemata at different
+  scales to be considered (e.g., $1?001??$ together with $??00???$). 
+\item Relatedly, it facilitates further movement in the direction of
+  fine-grained search - just as hBOA allows us to take smaller steps than BOA,
+  the new approach allows us to make even smaller modifications to our model.
+\item It introduces an important \emph{level of indirection} - search does not
+  act directly on solution space, but views and transforms solutions only via
+  schemata that are deemed useful, based potentially on both prior knowledge
+  and on learning.
+\end{enumerate}
+
+There are certainly a number of questions with this approach that will need to
+be resolved through further theory and experiment, including:
+\begin{enumerate}
+\item What is the best combination (robust across many problems of interest) of
+  noise, macromutation, and/or backtracking?
+\item If noise is used, how to tune it, if a constant value is insufficient? A
+  simple proposal from the local search literature is adapt noise dynamically
+  based on ratio of the mean and the variance of the scores of the solutions
+  uncovered~\cite{ls_invariants}. A value 10\% above the minimum is proposed. A
+  more advanced system might be based on thermodynamic simulated
+  annealing~\cite{tsa}.
+\item If macromutation is used, how to best set and adapt the macromutation
+  size?
+\item How to best learn linkages? Adapting the Bayes-Dirichlet metric (as used
+  in the hBOA~\cite{hBOA}), or even something simpler, seems like a decent
+  approach.
+\end{enumerate}
+
+\section{Acknowledgements}
+
+Thanks to Ben Goertzel, David Iclanzan, and Martin Pelikan for reviewing drafts
+of this document and providing suggestions.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}
